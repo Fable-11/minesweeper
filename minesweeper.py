@@ -274,10 +274,12 @@ def _make_wav_bytes(samples, sample_rate=22050):
 
 def _tone(freq, duration, volume=0.3, sr=22050):
     n = int(sr * duration)
+    attack = int(sr * 0.003)
     samples = []
     for i in range(n):
         t = i / sr
-        env = max(0, 1.0 - i / n)
+        att = min(1.0, i / max(1, attack))
+        env = max(0, 1.0 - i / n) * att
         val = math.sin(2 * math.pi * freq * t) * volume * env
         samples.append(max(-32767, min(32767, int(val * 32767))))
     return samples
@@ -285,16 +287,19 @@ def _tone(freq, duration, volume=0.3, sr=22050):
 
 def _noise(duration, volume=0.3, sr=22050):
     n = int(sr * duration)
-    return [max(-32767, min(32767, int((random.random() * 2 - 1) * volume * max(0, 1.0 - i / n) * 32767))) for i in range(n)]
+    attack = max(1, int(sr * 0.003))
+    return [max(-32767, min(32767, int((random.random() * 2 - 1) * volume * max(0, 1.0 - i / n) * min(1.0, i / attack) * 32767))) for i in range(n)]
 
 
 def _sweep(f1, f2, duration, volume=0.3, sr=22050):
     n = int(sr * duration)
+    attack = int(sr * 0.003)
     samples = []
     for i in range(n):
         t = i / sr
+        att = min(1.0, i / max(1, attack))
         phase = 2 * math.pi * (f1 * t + (f2 - f1) * t * t / (2 * duration))
-        env = max(0, 1.0 - i / n)
+        env = max(0, 1.0 - i / n) * att
         samples.append(max(-32767, min(32767, int(math.sin(phase) * volume * env * 32767))))
     return samples
 
@@ -304,6 +309,14 @@ def _silence(duration, sr=22050):
 
 
 def _make_sound(samples, sr=22050):
+    attack = int(sr * 0.002)
+    for i in range(min(attack, len(samples))):
+        samples[i] = int(samples[i] * (i / max(1, attack)))
+    alpha = 0.75
+    prev = 0.0
+    for i in range(len(samples)):
+        prev = alpha * samples[i] + (1 - alpha) * prev
+        samples[i] = max(-32767, min(32767, int(prev * 0.82)))
     return pygame.mixer.Sound(buffer=_make_wav_bytes(samples, sr).read())
 
 
@@ -403,77 +416,107 @@ def generate_sounds(theme_id):
         sounds['btn_expert'] = _make_sound(_sweep(880, 220, 0.2, 0.22, sr), sr)
 
     elif theme_id == "lavender":
-        bell = []
-        n = int(sr * 0.08)
+        drop = []
+        n = int(sr * 0.12)
+        phase = 0
+        dur = n / sr
         for i in range(n):
             t = i / sr
             env = math.exp(-i / n * 4)
-            val = (math.sin(2 * math.pi * 1200 * t) * 0.2 +
-                   math.sin(2 * math.pi * 2400 * t) * 0.06) * env
-            bell.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['click'] = _make_sound(bell, sr)
+            freq = 450 - 250 * (t / dur)
+            phase += 2 * math.pi * freq / sr
+            wobble = 1.0 + 0.15 * math.sin(2 * math.pi * 8 * t)
+            val = math.sin(phase) * 0.14 * env * wobble
+            drop.append(max(-32767, min(32767, int(val * 32767))))
+        sounds['click'] = _make_sound(drop, sr)
 
-        flutter = []
-        n = int(sr * 0.1)
+        bubble = []
+        n = int(sr * 0.12)
+        phase = 0
+        dur = n / sr
         for i in range(n):
             t = i / sr
-            env = max(0, 1.0 - i / n)
-            trem = 0.5 + 0.5 * math.sin(2 * math.pi * 25 * t)
-            val = math.sin(2 * math.pi * 800 * t) * 0.2 * env * trem
-            flutter.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['flag_place'] = _make_sound(flutter, sr)
+            env = math.exp(-i / n * 4)
+            freq = 300 + 400 * (t / dur)
+            phase += 2 * math.pi * freq / sr
+            wobble = 1.0 + 0.15 * math.sin(2 * math.pi * 8 * t)
+            val = math.sin(phase) * 0.14 * env * wobble
+            bubble.append(max(-32767, min(32767, int(val * 32767))))
+        sounds['flag_place'] = _make_sound(bubble, sr)
 
-        unflutter = []
+        pop = []
         n = int(sr * 0.08)
+        phase = 0
         for i in range(n):
             t = i / sr
-            env = max(0, 1.0 - i / n)
-            trem = 0.5 + 0.5 * math.sin(2 * math.pi * 20 * t)
-            val = math.sin(2 * math.pi * 600 * t) * 0.15 * env * trem
-            unflutter.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['flag_remove'] = _make_sound(unflutter, sr)
+            env = math.exp(-i / n * 7)
+            freq = 500 * math.exp(-t * 10) + 100
+            phase += 2 * math.pi * freq / sr
+            val = (math.sin(phase) * 0.12 + (random.random() * 2 - 1) * 0.03 * env) * env
+            pop.append(max(-32767, min(32767, int(val * 32767))))
+        sounds['flag_remove'] = _make_sound(pop, sr)
 
-        sounds['explode'] = _make_sound(_sweep(1500, 400, 0.2, 0.2, sr) + _noise(0.08, 0.06, sr), sr)
+        rumble = []
+        n = int(sr * 0.5)
+        for i in range(n):
+            t = i / sr
+            env = max(0, 1.0 - i / n) ** 1.8
+            val = (math.sin(2 * math.pi * 45 * t) * 0.35 +
+                   math.sin(2 * math.pi * 70 * t) * 0.2 +
+                   (random.random() * 2 - 1) * 0.08) * env * 0.3
+            rumble.append(max(-32767, min(32767, int(val * 32767))))
+        sounds['explode'] = _make_sound(rumble, sr)
 
         win = []
-        for freq in [784, 988, 1175, 1568]:
-            note_len = int(sr * 0.12)
+        for freq in [523, 659, 784, 1047]:
+            note_len = int(sr * 0.15)
             for i in range(note_len):
                 t = i / sr
-                env = math.exp(-i / note_len * 3)
-                val = (math.sin(2 * math.pi * freq * t) * 0.2 +
-                       math.sin(2 * math.pi * freq * 3 * t) * 0.04) * env
+                env = math.exp(-i / note_len * 2.5)
+                val = (math.sin(2 * math.pi * freq * t) * 0.16 +
+                       math.sin(2 * math.pi * freq * 0.5 * t) * 0.06) * env
                 win.append(max(-32767, min(32767, int(val * 32767))))
         sounds['win'] = _make_sound(win, sr)
 
-        chime_base = []
-        n = int(sr * 0.1)
+        drip1 = []
+        n = int(sr * 0.08)
+        phase = 0
         for i in range(n):
             t = i / sr
-            env = math.exp(-i / n * 3)
-            val = math.sin(2 * math.pi * 880 * t) * 0.2 * env
-            chime_base.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['btn_easy'] = _make_sound(chime_base, sr)
+            env = math.exp(-i / n * 5)
+            freq = 400 * math.exp(-t * 10) + 150
+            phase += 2 * math.pi * freq / sr
+            val = math.sin(phase) * 0.13 * env
+            drip1.append(max(-32767, min(32767, int(val * 32767))))
+        sounds['btn_easy'] = _make_sound(drip1, sr)
 
-        chime2 = []
-        for freq in [880, 1047]:
-            n = int(sr * 0.08)
+        drip2 = []
+        for base_f in [450, 550]:
+            n = int(sr * 0.06)
+            phase = 0
             for i in range(n):
                 t = i / sr
-                env = math.exp(-i / n * 3)
-                val = math.sin(2 * math.pi * freq * t) * 0.18 * env
-                chime2.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['btn_medium'] = _make_sound(chime2, sr)
+                env = math.exp(-i / n * 5)
+                freq = base_f * math.exp(-t * 10) + 150
+                phase += 2 * math.pi * freq / sr
+                val = math.sin(phase) * 0.12 * env
+                drip2.append(max(-32767, min(32767, int(val * 32767))))
+            drip2 += _silence(0.02, sr)
+        sounds['btn_medium'] = _make_sound(drip2, sr)
 
-        chime3 = []
-        for freq in [880, 1047, 1319]:
-            n = int(sr * 0.07)
+        drip3 = []
+        for base_f in [400, 500, 650]:
+            n = int(sr * 0.05)
+            phase = 0
             for i in range(n):
                 t = i / sr
-                env = math.exp(-i / n * 3)
-                val = math.sin(2 * math.pi * freq * t) * 0.18 * env
-                chime3.append(max(-32767, min(32767, int(val * 32767))))
-        sounds['btn_expert'] = _make_sound(chime3, sr)
+                env = math.exp(-i / n * 5)
+                freq = base_f * math.exp(-t * 10) + 150
+                phase += 2 * math.pi * freq / sr
+                val = math.sin(phase) * 0.12 * env
+                drip3.append(max(-32767, min(32767, int(val * 32767))))
+            drip3 += _silence(0.015, sr)
+        sounds['btn_expert'] = _make_sound(drip3, sr)
 
     return sounds
 
